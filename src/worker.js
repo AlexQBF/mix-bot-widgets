@@ -806,10 +806,11 @@ async function onText(env, msg, ctx) {
   }
   // Служебные команды: /id — всем (чтобы узнать свой ID для настройки admins), остальные — только админам.
   if (cmd === '/id') return send(env, chat, `Твой Telegram ID: <code>${msg.from && msg.from.id}</code>`);
-  if (cmd === '/reload' || cmd === '/config' || cmd === '/stock' || cmd === '/find' || cmd === '/ratings') {
+  if (cmd === '/reload' || cmd === '/config' || cmd === '/stock' || cmd === '/find' || cmd === '/ratings' || cmd === '/wtest') {
     if (!(await adminIds(env)).includes(String(msg.from && msg.from.id))) return send(env, chat, 'Эта команда только для админов бота.');
     if (cmd === '/reload' || cmd === '/stock') return send(env, chat, 'Таблицу и наличие обновляет основной бот: команды /reload и /stock — там. Сюда изменения приходят сами, в течение минуты.');
     if (cmd === '/ratings') return send(env, chat, esc(await ratingsReport(env)).slice(0, 4000));
+    if (cmd === '/wtest') return widgetTest(env, chat);
     if (cmd === '/find') {
       // Поиск по справочнику htreviews: /find spectrum honey
       const q = words(text.replace(/^\/find\S*/i, ''));
@@ -908,7 +909,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = 'W 14.11 · 1 (виджеты: карточка, заказ, оценки)';
+const CODE_VERSION = 'W 14.11 · 2 (проверка виджетов /wtest)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1094,6 +1095,24 @@ async function makeMixes(env, chat, session, more = false, lang = 'ru', note = '
     { expirationTtl: WIDGET_TTL }).catch((e) => console.log('card', e.message));
   const j = await editCard(env, chat, id, st, widgetCaption(result) + (note ? '\n\n' + plain(note) : ''), kb);
   if (!j.ok && !/not modified/i.test(j.description || '')) return asText();
+}
+
+/** /wtest — проверка, какие виджеты Telegram принимает от этого бота: от самого простого к полной карточке. */
+async function widgetTest(env, chat) {
+  const mini = '<p>Проверка виджета</p>';
+  const cases = [
+    ['простой, без запросов', { html: mini }],
+    ['простой, с запросами', { html: mini, allow_queries: true }],
+    ['карточка, без запросов', { html: WIDGET_HTML, chat_data: loadingState(1) }],
+    ['карточка, с запросами', { html: WIDGET_HTML, chat_data: loadingState(1), allow_queries: true }],
+  ];
+  const lines = [];
+  for (const [name, body] of cases) {
+    const j = await tg(env, 'sendWidget', { chat_id: chat, caption: 'Проверка: ' + name, ...body });
+    lines.push((j.ok ? '✅ ' : '❌ ') + name + (j.ok ? '' : ' — ' + String(j.description || 'нет ответа').slice(0, 120)));
+  }
+  const me = await tg(env, 'getMe', {});
+  return send(env, chat, esc('Проверка виджетов (' + CODE_VERSION.split(' (')[0] + ', бот @' + ((me.result && me.result.username) || '?') + '):\n' + lines.join('\n')));
 }
 
 /** Правка карточки: состояние, затем подпись с кнопками. «message is not modified» — не ошибка. */
