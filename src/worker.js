@@ -810,7 +810,7 @@ async function onText(env, msg, ctx) {
     if (!(await adminIds(env)).includes(String(msg.from && msg.from.id))) return send(env, chat, 'Эта команда только для админов бота.');
     if (cmd === '/reload' || cmd === '/stock') return send(env, chat, 'Таблицу и наличие обновляет основной бот: команды /reload и /stock — там. Сюда изменения приходят сами, в течение минуты.');
     if (cmd === '/ratings') return send(env, chat, esc(await ratingsReport(env)).slice(0, 4000));
-    if (cmd === '/wtest') return widgetTest(env, chat);
+    if (cmd === '/wtest') return widgetTest(env, chat, msg);
     if (cmd === '/find') {
       // Поиск по справочнику htreviews: /find spectrum honey
       const q = words(text.replace(/^\/find\S*/i, ''));
@@ -909,7 +909,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = 'W 14.11 · 2 (проверка виджетов /wtest)';
+const CODE_VERSION = 'W 14.11 · 3 (проверка виджетов /wtest: темы, бета-адрес)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1097,22 +1097,31 @@ async function makeMixes(env, chat, session, more = false, lang = 'ru', note = '
   if (!j.ok && !/not modified/i.test(j.description || '')) return asText();
 }
 
-/** /wtest — проверка, какие виджеты Telegram принимает от этого бота: от самого простого к полной карточке. */
-async function widgetTest(env, chat) {
+/** /wtest — проверка, при каких условиях Telegram принимает виджет от этого бота. */
+async function widgetTest(env, chat, msg = {}) {
   const mini = '<p>Проверка виджета</p>';
+  const thread = msg.message_thread_id;
+  const beta = async (body) => {
+    try {
+      const r = await fetch(`https://api.telegram.org/beta/bot${env.BOT_TOKEN}/sendWidget`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      return await r.json().catch(() => ({ description: 'код ' + r.status }));
+    } catch (e) { return { description: e.message }; }
+  };
   const cases = [
-    ['простой, без запросов', { html: mini }],
-    ['простой, с запросами', { html: mini, allow_queries: true }],
-    ['карточка, без запросов', { html: WIDGET_HTML, chat_data: loadingState(1) }],
-    ['карточка, с запросами', { html: WIDGET_HTML, chat_data: loadingState(1), allow_queries: true }],
+    ['обычная отправка', (b) => tg(env, 'sendWidget', b), {}],
+    ...(thread ? [['в эту же тему чата', (b) => tg(env, 'sendWidget', b), { message_thread_id: thread }]] : []),
+    ['через бета-адрес Bot API', beta, {}],
+    ...(thread ? [['бета-адрес, в эту же тему', beta, { message_thread_id: thread }]] : []),
+    ['карточка с запросами' + (thread ? ', в эту же тему' : ''), (b) => tg(env, 'sendWidget', b), { html: WIDGET_HTML, chat_data: loadingState(1), allow_queries: true, ...(thread ? { message_thread_id: thread } : {}) }],
   ];
   const lines = [];
-  for (const [name, body] of cases) {
-    const j = await tg(env, 'sendWidget', { chat_id: chat, caption: 'Проверка: ' + name, ...body });
+  for (const [name, call, extra] of cases) {
+    const j = await call({ chat_id: chat, html: mini, caption: 'Проверка: ' + name, ...extra });
     lines.push((j.ok ? '✅ ' : '❌ ') + name + (j.ok ? '' : ' — ' + String(j.description || 'нет ответа').slice(0, 120)));
   }
-  const me = await tg(env, 'getMe', {});
-  return send(env, chat, esc('Проверка виджетов (' + CODE_VERSION.split(' (')[0] + ', бот @' + ((me.result && me.result.username) || '?') + '):\n' + lines.join('\n')));
+  const me = (await tg(env, 'getMe', {})).result || {};
+  return send(env, chat, esc('Проверка виджетов (' + CODE_VERSION.split(' (')[0] + ', бот @' + (me.username || '?') + ')\n' +
+    `Темы в чате с ботом: ${me.has_topics_enabled ? 'включены' : 'выключены'}; это сообщение ${thread ? 'в теме ' + thread : 'вне тем'}\n\n` + lines.join('\n')));
 }
 
 /** Правка карточки: состояние, затем подпись с кнопками. «message is not modified» — не ошибка. */
