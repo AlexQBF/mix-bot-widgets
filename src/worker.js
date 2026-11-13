@@ -909,7 +909,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = 'W 14.11 · 3 (проверка виджетов /wtest: темы, бета-адрес)';
+const CODE_VERSION = 'W 14.11 · 4 (виджеты не разрешены — тихо отвечаем текстом)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1054,13 +1054,19 @@ const WIDGET_TTL = 30 * 86400;
 async function makeMixes(env, chat, session, more = false, lang = 'ru', note = '') {
   const cfg = await loadConfig(env);
   const t = tx(cfg, lang);
+  // Telegram пока не разрешает виджеты этому боту — 6 часов не пробуем, сразу отвечаем текстом. /wtest проверяет заново.
+  if (await env.KV.get('widget:off').catch(() => null)) return makeMixesText(env, chat, session, more, lang, note, true);
   const sent = await tg(env, 'sendWidget', {
     chat_id: chat, html: WIDGET_HTML, chat_data: loadingState(1), allow_queries: true,
     caption: plain(more ? t.pickingMore : t.picking) + (note ? '\n' + plain(note) : ''),
   });
   const id = sent && sent.ok && sent.result && sent.result.message_id;
   if (!id) {
-    await reportProblem(env, 'widget', '⚠️ Карточка-виджет не отправилась, отвечаю текстом. Ответ Telegram: ' + String((sent && sent.description) || 'нет ответа').slice(0, 300));
+    const why = String((sent && sent.description) || 'нет ответа').slice(0, 300);
+    if (/WIDGET_NOT_ALLOWED/.test(why)) {
+      await env.KV.put('widget:off', '1', { expirationTtl: 6 * 3600 }).catch(() => {});
+      await notifyAdmins(env, '⚠️ Telegram пока не разрешает этому боту виджеты (INPUT_MEDIA_WIDGET_NOT_ALLOWED). Ближайшие 6 часов отвечаю текстом, потом попробую снова. Проверить сразу — /wtest.');
+    } else await reportProblem(env, 'widget', '⚠️ Карточка-виджет не отправилась, отвечаю текстом. Ответ Telegram: ' + why);
     return makeMixesText(env, chat, session, more, lang, note, true);
   }
   const kb = resultKeyboard(t);
@@ -1117,6 +1123,7 @@ async function widgetTest(env, chat, msg = {}) {
   const lines = [];
   for (const [name, call, extra] of cases) {
     const j = await call({ chat_id: chat, html: mini, caption: 'Проверка: ' + name, ...extra });
+    if (j.ok && name === 'обычная отправка') await env.KV.delete('widget:off').catch(() => {});
     lines.push((j.ok ? '✅ ' : '❌ ') + name + (j.ok ? '' : ' — ' + String(j.description || 'нет ответа').slice(0, 120)));
   }
   const me = (await tg(env, 'getMe', {})).result || {};
