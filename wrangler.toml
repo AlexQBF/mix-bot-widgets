@@ -1,0 +1,75 @@
+name = "mix-bot-widgets"
+main = "src/worker.js"
+compatibility_date = "2025-01-01"
+
+# Второй бот Sigma Mix: миксы карточкой-виджетом Telegram.
+# Расписания нет: справочник вкусов, наличие и копию Google Таблицы обновляет первый бот (mix-bot),
+# этот бот их только читает из его хранилища (SHARED ниже). Правила, инструкция и «мозги» — общие, из той же таблицы.
+
+# Бесплатные модели Cloudflare (запасные, если платный ИИ не ответил)
+[ai]
+binding = "AI"
+
+# Код виджета widget/mix-card.html попадает в бота при сборке как текст.
+[[rules]]
+type = "Text"
+globs = ["**/*.html"]
+fallthrough = true
+
+# Логи в Cloudflare (Workers & Pages → mix-bot-widgets → Logs)
+[observability]
+enabled = true
+
+# Своё хранилище: диалоги, карточки, оценки миксов.
+[[kv_namespaces]]
+binding = "KV"
+id = "fe7b6f5b95384d61b9f7c04673d546e7"
+
+# Хранилище первого бота (mix-bot): только чтение справочника, наличия и копии таблицы.
+[[kv_namespaces]]
+binding = "SHARED"
+id = "feb60298be7e4467a50ee0c889bafdc6"
+
+[vars]
+# ── Все правила, тексты и параметры бота — в этой Google Таблице ──
+# Доступ к таблице: «Все, у кого есть ссылка» — «Читатель» (иначе бот её не прочитает),
+# редактировать — только приглашённым.
+CONFIG_SHEET_ID = "1iRdMg7O_PXx5F8KR-CfUTeQE9tgrafuypsZxG6MHz_4"
+
+# Скрипт Google, подключённый к таблице (Расширения → Apps Script): пишет журнал во вкладку «Журнал»
+# и отдаёт боту настройки — тогда таблицу можно закрыть от посторонних. Пусто — журнала нет, настройки читаются по ссылке.
+# Секрет к нему — SHEET_SECRET в Cloudflare (тот же, что константа SECRET в скрипте).
+SHEET_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxUzkkxg1DCU-rGxuuSGd37haRnnMhg3M9DX-OUt3WR55t67ztO0mCaEy2PzOCSd_H_/exec"
+
+# Запасной список админов (Telegram ID через запятую) — на случай, если admins во вкладке «Настройки» пустой.
+# Свой ID можно узнать командой /id у бота.
+ADMIN_IDS = ""
+
+# ── Платные модели ──
+# КТО работает — выбирается в таблице: «Настройки» → text_ai (chatgpt / claude / бесплатно) и image_ai (chatgpt / бесплатно).
+# КАКИЕ именно модели — здесь.
+
+# ChatGPT (ключ OpenAI — секрет IMAGE_API_KEY):
+# сборка миксов: gpt-6.1-terra — быстрая и недорогая, хорошо пишет; умнее и вдвое дороже — "gpt-6.1-sol"
+OPENAI_MODEL = "gpt-6.1-terra"
+# разбор сообщения клиента — простая задача, самая дешёвая модель
+OPENAI_MODEL_FAST = "gpt-6-luna"
+# сколько модель «думает» над миксами: "low" — быстро и дёшево; "medium" — тщательнее, дольше и дороже
+OPENAI_EFFORT = "low"
+# картинки
+OPENAI_IMAGE_MODEL = "gpt-image-2.5-flare"
+# качество картинки: "medium" (~1,3 цента) или "high" (~5 центов)
+IMAGE_QUALITY = "medium"
+
+# Claude (ключ Anthropic — секрет LLM_API_KEY):
+CLAUDE_MODEL = "claude-sonnet-5-5"
+CLAUDE_MODEL_FAST = "claude-haiku-5-5"
+
+# Если платный ИИ не ответил — этот запрос бесплатно обработает Cloudflare (Llama / FLUX), админам придёт причина.
+
+# Секреты (Settings → Variables and Secrets, тип Secret):
+#   BOT_TOKEN       — токен ЭТОГО (второго) бота от @BotFather
+#   WEBHOOK_SECRET  — случайная строка (латиница и цифры)
+#   LLM_API_KEY     — ключ Anthropic (для Claude)
+#   IMAGE_API_KEY   — ключ OpenAI (ChatGPT) — тот же, что у первого бота
+#   SHEET_SECRET    — секрет скрипта Google (журнал) — тот же, что у первого бота
